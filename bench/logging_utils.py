@@ -86,7 +86,8 @@ class JsonlLogger:
         self._f = open(self.path, "w")
 
     def log_iteration(self, *, iteration: int, is_warmup: bool, wall_time_s: float,
-                       cumulative_time_s: float, config_spec: dict, result: dict) -> None:
+                       cumulative_time_s: float, config_spec: dict, result: dict,
+                       extra: dict | None = None) -> None:
         row = {
             **self.run_meta,
             "iter": iteration,
@@ -94,6 +95,7 @@ class JsonlLogger:
             "wall_time_s": wall_time_s,
             "cumulative_time_s": cumulative_time_s,
             "throughput_sps": config_spec["batch"] / wall_time_s,
+            **(extra or {}),
             # préfixe distinct de "config/*" : RLlib aplatit son PROPRE dump de
             # config dans `result` (des centaines de clés internes), on ne
             # veut pas que nos 8 champs s'y mélangent.
