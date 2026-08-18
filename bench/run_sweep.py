@@ -31,6 +31,10 @@ from bench.sweep import SWEEP, build_sweep_config  # noqa: E402
 
 LOGS_DIR = Path(__file__).resolve().parent.parent / "logs"
 STEPS_KEY = "env_runners/num_env_steps_sampled_lifetime"
+# Nombre d'itérations sans le moindre échantillon collecté avant d'abandonner
+# le run. 3 suffit : une itération à vide est déjà anormale, et chacune coûte
+# le `sample_timeout_s` complet (~70 s).
+MAX_STALLED_ITERS = 3
 
 
 def _already_done(path: Path, max_env_steps: int) -> bool:
@@ -68,13 +72,28 @@ def run_one(spec, seed: int, args, run_id: str, meta: dict) -> str:
         "seed": seed,
     }
 
-    steps, iteration, t_cumulative = 0, 0, 0.0
+    steps, iteration, t_cumulative, stalled = 0, 0, 0.0, 0
     while steps < args.max_env_steps:
         t0 = time.perf_counter()
         result = algo.train()
         dt = time.perf_counter() - t0
         t_cumulative += dt
-        steps = int(result.get("env_runners", {}).get("num_env_steps_sampled_lifetime", 0))
+
+        # Quand les EnvRunners meurent (OOM), Ray les redémarre et RLlib renvoie
+        # `num_env_steps_sampled_lifetime = 0` avec des métriques `nan`. Sans le
+        # `max()`, `steps` retomberait à 0 et la boucle tournerait pour toujours
+        # (observé : 65 itérations à vide avant qu'on coupe à la main).
+        reported = int(result.get("env_runners", {}).get("num_env_steps_sampled_lifetime", 0))
+        if reported <= steps:
+            stalled += 1
+            if stalled >= MAX_STALLED_ITERS:
+                raise RuntimeError(
+                    f"aucun échantillon collecté depuis {stalled} itérations "
+                    f"(EnvRunners morts, typiquement OOM à batch={spec.batch}) — run abandonné"
+                )
+        else:
+            stalled = 0
+        steps = max(steps, reported)
 
         logger.log_iteration(
             iteration=iteration, is_warmup=(iteration == 0), wall_time_s=dt,
@@ -88,6 +107,11 @@ def run_one(spec, seed: int, args, run_id: str, meta: dict) -> str:
 
     logger.close()
     algo.stop()
+    # Marqueur de fin de run : sert au suivi en tâche de fond (un sweep dure
+    # plusieurs heures, il faut pouvoir compter les runs terminés sans parser
+    # les JSONL).
+    print(f"  -> TERMINÉ {spec.name}/seed{seed} : {steps} pas en {t_cumulative/60:.1f} min "
+          f"({steps/t_cumulative:.0f} éch/s) -> {log_path.name}", flush=True)
     return "ok"
 
 
@@ -116,9 +140,13 @@ def main() -> None:
     seeds = [int(s) for s in args.seeds.split(",")]
     outcomes: dict[str, str] = {}
 
-    for name in names:
-        spec = SWEEP[name]
-        for seed in seeds:
+    # Graines à l'EXTÉRIEUR, configs à l'intérieur : si le sweep est interrompu,
+    # on a les 8 configs à 1 graine (comparaison possible, juste bruitée) plutôt
+    # que 3 configs à 3 graines (rien à comparer). L'ordre inverse rendrait toute
+    # coupure anticipée inexploitable.
+    for seed in seeds:
+        for name in names:
+            spec = SWEEP[name]
             tag = f"{name}/seed{seed}"
             print(f"=== {tag} : {spec.lever} (batch={spec.batch} mb={spec.minibatch} "
                   f"workers={spec.workers} learners={spec.num_learners}) ===", flush=True)
