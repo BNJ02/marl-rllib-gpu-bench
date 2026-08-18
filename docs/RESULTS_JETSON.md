@@ -106,9 +106,10 @@ absorbe bien — **S5 devrait donc gagner encore plus largement sur A40**.
 ## Ce que le Jetson n'a pas pu mesurer
 
 - **S4 (`batch=65536`)** : OOM des EnvRunners sur les 3 graines, 0 échantillon
-  collecté. Retenté avec 2 workers (`S4b`) : échoue également. La mémoire
-  unifiée de 8 Go est saturée par le volume d'épisodes, indépendamment du
-  découpage. **À mesurer sur A40.**
+  collecté. Retenté avec 2 workers (`S4b`, justifié par la pureté de
+  `num_env_runners` établie en S7) : **échoue aussi, sur les 3 graines**. La
+  mémoire unifiée de 8 Go est saturée par le volume d'épisodes, indépendamment
+  du découpage en workers. **À mesurer sur A40.**
 - **S8 (`num_learners=1`)** : `torch.distributed.is_available() == False` — le
   wheel torch NVIDIA JetPack est compilé sans, or RLlib l'exige dès
   `num_learners ≥ 1`. Rien à voir avec la convergence, le run n'a jamais
