@@ -79,6 +79,18 @@ SWEEP: dict[str, SweepSpec] = {
     # acteur Ray séparé du driver. Test de PLACEMENT, pas de parallélisme.
     "S8": SweepSpec("S8", "num_learners=1", "PUR attendu : batch effectif inchangé",
                     num_learners=1, workers=BASE_WORKERS - 1),
+    # Rattrapage de S4, qui fait OOM à 4 workers sur les 8 Go de mémoire unifiée
+    # du Jetson (EnvRunners tués, 0 échantillon collecté). Moins de workers = moins
+    # de process torch simultanés.
+    #
+    # Pourquoi c'est valide malgré le changement de deux paramètres à la fois :
+    # S7 a mesuré que `num_env_runners` est PUR (+3.8 % d'échantillons vs une
+    # variance inter-graines de 4 % sur la baseline). Sa courbe
+    # retour-vs-échantillons est donc comparable aux autres configs. Son TEMPS
+    # mural, lui, ne l'est pas — à ne pas mettre dans le classement chrono.
+    "S4b": SweepSpec("S4b", "batch=65536 (2 workers)",
+                     "comme S4, mais mesurable : convergence comparable, chrono non",
+                     batch=65536, minibatch=8192, workers=2),
 }
 
 
