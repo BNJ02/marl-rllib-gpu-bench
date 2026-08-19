@@ -49,6 +49,7 @@ class SweepSpec:
     batch: int = BASE_BATCH
     minibatch: int = BASE_MINIBATCH
     workers: int = BASE_WORKERS
+    envs_per_runner: int = 1
     num_learners: int = 0
     use_gpu: bool = True
 
@@ -91,6 +92,26 @@ SWEEP: dict[str, SweepSpec] = {
     "S4b": SweepSpec("S4b", "batch=65536 (2 workers)",
                      "comme S4, mais mesurable : convergence comparable, chrono non",
                      batch=65536, minibatch=8192, workers=2),
+
+    # --- E1-E3 : pureté de `num_envs_per_env_runner`, sous contrainte 8 cœurs.
+    #
+    # La matrice de débit a mesuré x1,63 pour ce levier (mieux que 64 workers,
+    # en 4x moins de process) — décisif sur une machine à peu de cœurs. Mais sa
+    # pureté n'était PAS établie : plus d'envs en parallèle = plus d'épisodes à
+    # cheval sur les frontières de batch = bootstrapping GAE sur des épisodes
+    # incomplets, donc un signal d'apprentissage potentiellement différent.
+    #
+    # Testé sur la config réellement recommandée (batch 1024, mb 128, 6 workers)
+    # plutôt que sur la baseline générique : c'est celle qu'on déploierait.
+    # À E3, chaque env n'avance que d'~11 pas par itération alors qu'un épisode
+    # Pendulum en fait 200 (il s'étale sur ~19 itérations) : c'est le régime où
+    # la pureté a le plus de chances de casser.
+    "E1": SweepSpec("E1", "envs/runner=1 (réf pureté)", "référence",
+                    batch=1024, minibatch=128, workers=6, envs_per_runner=1),
+    "E2": SweepSpec("E2", "envs/runner=4", "pur ? (à établir)",
+                    batch=1024, minibatch=128, workers=6, envs_per_runner=4),
+    "E3": SweepSpec("E3", "envs/runner=16", "pur ? (le plus à risque)",
+                    batch=1024, minibatch=128, workers=6, envs_per_runner=16),
 }
 
 
@@ -120,6 +141,7 @@ def build_sweep_config(spec: SweepSpec, seed: int, force_cpu: bool = False) -> P
         )
         .env_runners(
             num_env_runners=spec.workers,
+            num_envs_per_env_runner=spec.envs_per_runner,
             # multi_agent=True obligatoire : sans ça le filtre reçoit l'espace
             # d'observation multi-agent (dict AgentID -> Box) et essaie d'en
             # faire un seul np.zeros(shape) -> TypeError au démarrage.

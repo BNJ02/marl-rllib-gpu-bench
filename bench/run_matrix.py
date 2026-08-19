@@ -27,6 +27,7 @@ os.environ.setdefault("RAY_ENABLE_UV_RUN_RUNTIME_ENV", "0")
 import ray  # noqa: E402
 
 from bench.logging_utils import JsonlLogger, run_metadata  # noqa: E402
+from bench import matrix as matrix_mod  # noqa: E402
 from bench.matrix import MATRIX, build_matrix_config  # noqa: E402
 
 LOGS_DIR = Path(__file__).resolve().parent.parent / "logs"
@@ -84,24 +85,32 @@ def run_one(spec, args, run_id: str, meta: dict) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--configs", default=",".join(MATRIX))
+    ap.add_argument("--configs", default=None)
     ap.add_argument("--iters", type=int, default=5)
     ap.add_argument("--resume", action="store_true")
     ap.add_argument("--run-id", default=None)
+    ap.add_argument("--ray-cpus", type=int, default=None,
+                     help="limite les CPU vus par Ray (émulation d'une machine plus petite ; "
+                          "sans ça son ordonnanceur croit disposer de toute la machine)")
+    ap.add_argument("--matrix", default="MATRIX", choices=["MATRIX", "MATRIX_A40"],
+                     help="quel dict de configs utiliser")
     args = ap.parse_args()
 
     run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     meta = run_metadata(os.cpu_count())
     print(f"run_id={run_id}  {meta}\n", flush=True)
 
+    table = getattr(matrix_mod, args.matrix)
+    names = args.configs.split(",") if args.configs else list(table)
     outcomes: dict[str, str] = {}
-    for name in args.configs.split(","):
-        spec = MATRIX[name]
+    for name in names:
+        spec = table[name]
         print(f"=== {spec.name} : {spec.lever} ===", flush=True)
         try:
             # Cluster neuf par config : sinon les acteurs de la config
             # précédente restent alloués et faussent les mesures suivantes.
-            ray.init(include_dashboard=False, log_to_driver=False)
+            ray.init(include_dashboard=False, log_to_driver=False,
+                      **({"num_cpus": args.ray_cpus} if args.ray_cpus else {}))
             outcomes[spec.name] = run_one(spec, args, run_id, meta)
         except Exception as exc:
             outcomes[spec.name] = f"FAILED: {type(exc).__name__}"

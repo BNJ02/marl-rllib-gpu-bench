@@ -50,7 +50,10 @@ def main() -> None:
             "note": last.get("bench_config/note", ""),
         }
         results.append(r)
-        if name == "M00":
+        # Référence = la config "00" de la matrice utilisée (M00 pour MATRIX,
+        # A00 pour MATRIX_A40). Chercher "M00" en dur laissait la colonne
+        # "vs réf" vide sur toute matrice ne commençant pas par M.
+        if name.endswith("00"):
             base = r
 
     print(f"{'cfg':5s} {'levier':38s} {'éch/s':>9s} {'s/iter':>7s} "

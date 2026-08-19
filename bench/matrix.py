@@ -189,3 +189,50 @@ MATRIX: dict[str, MatrixSpec] = {
     "M24": _s("M24", "w64 + batch65536 + GPU", workers=64, batch=65_536,
               minibatch=8_192),
 }
+
+
+# --------------------------------------------------------------------------
+# Matrice pour la machine cible ÉMULÉE : 8 cœurs physiques + 1 GPU type A40.
+#
+# `MATRIX` ci-dessus a une référence à 16 workers, ce qui dépasse le budget de
+# cœurs de la cible — d'où un dict séparé plutôt qu'un sous-ensemble.
+# Référence ici : 6 workers (cœurs - 2), batch 1024, mb 128 = la config
+# recommandée à l'issue des campagnes Jetson + cluster.
+#
+# À lancer sous `taskset -c 0-7` + `CUDA_VISIBLE_DEVICES` sur un seul GPU, et
+# avec `--ray-cpus 8` : les trois sont nécessaires, aucun ne suffit seul.
+# --------------------------------------------------------------------------
+def _a(name, lever, **kw) -> MatrixSpec:
+    kw.setdefault("batch", 1_024)
+    kw.setdefault("minibatch", 128)
+    kw.setdefault("workers", 6)
+    return MatrixSpec(name=name, lever=lever, **kw)
+
+
+MATRIX_A40: dict[str, MatrixSpec] = {
+    "A00": _a("A00", "référence cible (batch1024 mb128 w6 GPU)"),
+
+    # jusqu'où monter les workers avec seulement 8 cœurs ?
+    "A01": _a("A01", "workers=2", workers=2),
+    "A02": _a("A02", "workers=4", workers=4),
+    "A03": _a("A03", "workers=8", workers=8),
+
+    # le levier clé sur une machine à peu de cœurs (pureté testée par E1-E3)
+    "A04": _a("A04", "envs/runner=4", envs_per_runner=4),
+    "A05": _a("A05", "envs/runner=8", envs_per_runner=8),
+    "A06": _a("A06", "envs/runner=16", envs_per_runner=16),
+
+    # le GPU vaut-il encore x1,9 avec seulement 8 cœurs pour l'alimenter ?
+    "A07": _a("A07", "learner CPU", gpus_per_learner=0.0),
+
+    # batch : +12 % (régime Jetson, CPU-pauvre) ou +104 % (régime 128 cœurs) ?
+    "A08": _a("A08", "batch=4096", batch=4_096, minibatch=512),
+    "A09": _a("A09", "batch=16384", batch=16_384, minibatch=2_048),
+
+    # coût des updates sur ce GPU, à batch fixe
+    "A10": _a("A10", "batch=4096 mb=128", batch=4_096, minibatch=128),
+    "A11": _a("A11", "batch=4096 mb=2048", batch=4_096, minibatch=2_048),
+
+    # combinaison des leviers purs : tous les cœurs + vectorisation
+    "A12": _a("A12", "w8 + envs/runner=8 + GPU", workers=8, envs_per_runner=8),
+}

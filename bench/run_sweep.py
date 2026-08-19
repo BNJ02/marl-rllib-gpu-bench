@@ -125,12 +125,21 @@ def main() -> None:
                      help="skippe les (config, graine) déjà terminés")
     ap.add_argument("--run-id", default=None,
                      help="réutiliser un run_id existant (pour --resume)")
+    ap.add_argument("--ray-cpus", type=int, default=None,
+                     help="limite les CPU vus par Ray (émulation d'une machine plus petite)")
     ap.add_argument("--jetson-workaround", action="store_true",
                      help="désactive cuDNN (wheel torch NVIDIA pré-release JetPack)")
     args = ap.parse_args()
 
     if args.jetson_workaround:
         torch.backends.cudnn.enabled = False
+
+    if args.ray_cpus:
+        # Init explicite AVANT que RLlib ne le fasse tout seul : sinon Ray
+        # découvre tous les cœurs de la machine hôte et son ordonnanceur
+        # ignore la contrainte qu'on cherche à émuler.
+        import ray
+        ray.init(num_cpus=args.ray_cpus, include_dashboard=False, log_to_driver=False)
 
     run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     meta = run_metadata(os.cpu_count())

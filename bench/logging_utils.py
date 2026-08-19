@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import numbers
+import os
 import platform
 import subprocess
 from dataclasses import asdict
@@ -62,11 +63,23 @@ def git_commit() -> str | None:
 
 
 def run_metadata(cpu_count: int) -> dict:
+    """Métadonnées du run, y compris la PREUVE que les contraintes matérielles
+    demandées se sont appliquées.
+
+    `os.cpu_count()` renvoie le nombre de CPU de la machine **même sous
+    `taskset`** : s'y fier ferait logger 128 alors que le process est confiné à
+    8 cœurs, et toute une campagne d'émulation paraîtrait valide sans l'être.
+    `os.sched_getaffinity(0)` donne le vrai nombre de cœurs utilisables.
+    """
+    affinity = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else None
     return {
         "hostname": platform.node(),
         "platform": platform.platform(),
         "cpu_count_detected": cpu_count,
+        # Ce que le process peut RÉELLEMENT utiliser (respecte taskset/cgroup).
+        "cpu_affinity": affinity,
         "gpu_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+        "gpu_count_visible": torch.cuda.device_count(),
         "torch_version": torch.__version__,
         "cuda_available": torch.cuda.is_available(),
         "git_commit": git_commit(),
